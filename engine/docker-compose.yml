@@ -1,0 +1,114 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: rec-postgres
+    environment:
+      POSTGRES_USER: gorse
+      POSTGRES_PASSWORD: gorse
+      POSTGRES_DB: gorse
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: rec-redis
+    ports:
+      - "6379:6379"
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: rec-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: rec-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  gorse-master:
+    image: zhenghaoz/gorse-master:latest
+    container_name: rec-gorse-master
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8086:8086"
+      - "8088:8088"
+    volumes:
+      - ./infra/gorse/config.toml:/etc/gorse/config.toml
+    command: ["-c", "/etc/gorse/config.toml"]
+
+  gorse-server:
+    image: zhenghaoz/gorse-server:latest
+    container_name: rec-gorse-server
+    depends_on:
+      - gorse-master
+    ports:
+      - "8087:8087"
+    command: ["--master-host", "gorse-master:8086", "--http-host", "0.0.0.0", "--http-port", "8087"]
+
+  gorse-worker:
+    image: zhenghaoz/gorse-worker:latest
+    container_name: rec-gorse-worker
+    depends_on:
+      - gorse-master
+    command: ["--master-host", "gorse-master:8086"]
+
+  flink-jobmanager:
+    image: flink:1.19.1-scala_2.12-java17
+    container_name: rec-flink-jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+    command: jobmanager
+
+  flink-taskmanager:
+    image: flink:1.19.1-scala_2.12-java17
+    container_name: rec-flink-taskmanager
+    depends_on:
+      - flink-jobmanager
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=flink-jobmanager
+    command: taskmanager
+
+  faiss-recall:
+    build:
+      context: ./services/faiss-recall
+    container_name: rec-faiss-recall
+    ports:
+      - "8091:8091"
+
+  api:
+    build:
+      context: ./services/api
+    container_name: rec-api
+    depends_on:
+      - gorse-server
+      - faiss-recall
+      - kafka
+      - redis
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:

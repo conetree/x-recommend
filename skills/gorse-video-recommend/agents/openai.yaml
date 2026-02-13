@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gorse Video Recommend"
+  short_description: "轻量级开源TV/长视频推荐方案、架构与落地实施清单"
+  default_prompt: "输出基于 gorse+Flink+Faiss 的TV/长视频推荐技术方案文档与落地清单"
